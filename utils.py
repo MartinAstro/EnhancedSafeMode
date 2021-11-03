@@ -14,7 +14,7 @@ def load_checkpoint(tf_agent, replay_buffer, train_step, tempdir):
         )
 
     train_checkpointer.initialize_or_restore()
-    #train_step = tf.compat.v1.train.get_global_step()
+    train_step = tf.compat.v1.train.get_global_step()
     return tf_agent, replay_buffer, train_step
 
 def load_agent(tempdir):

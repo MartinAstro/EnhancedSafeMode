@@ -46,12 +46,11 @@ from metrics import log_eval_metrics, get_eval_metrics
 from visualization import visualize_returns
 from environment import SafeModeEnv
 
-tempdir = tempfile.gettempdir()
 
 def build_agent(env, config, train_step):
     # The critic network first encodes the observation ("state") and actions seperately,
     # then joins them and passes the jointed combinations through a fully connected network
-    # to produce stimates of the Q-values
+    # to produce estimates of the Q-values
     observation_spec, action_spec, time_step_spec = (
       spec_utils.get_tensor_specs(env))
 
@@ -63,7 +62,7 @@ def build_agent(env, config, train_step):
             (observation_spec, action_spec),
             observation_fc_layer_params=None, # No encoding
             action_fc_layer_params=None, # No encoding
-            joint_fc_layer_params=config['critic_joint_fc_layer_params'], # (256, 256) - 2 layers 256 units
+            joint_fc_layer_params=config['critic_joint_fc_layer_params'], # (nodes_layer_1, nodes_layer_2, ...)
             kernel_initializer='glorot_uniform',
             last_kernel_initializer='glorot_uniform'
         )
@@ -142,7 +141,7 @@ def build_eval_actor(eval_env, tf_agent, train_step, num_eval_episodes, tempdir)
                         )
     return eval_actor
 
-def build_agent_learner(tf_agent, train_step, policy_save_interval, replay_buffer, batch_size):
+def build_agent_learner(tf_agent, train_step, policy_save_interval, replay_buffer, batch_size, tempdir):
     dataset = replay_buffer.as_dataset(sample_batch_size=batch_size, num_steps=2).prefetch(50)
     experience_dataset_fn = lambda : dataset
     
@@ -202,11 +201,13 @@ def train_agent(tf_agent, eval_actor, collect_actor, agent_learner, configs):
     visualize_returns(num_iterations, eval_interval, returns)
 
 def main():
+    tempdir = tempfile.gettempdir()
+
     continue_training = False
     training_configs = {
-        'num_iterations' : 5000, # Number of iterations for training networks (epochs)
+        'num_iterations' : 10000, # Number of iterations for training networks (epochs)
         'eval_interval' : 1000, # How often the average return is calculated during training
-        'log_interval' : 100, # How often to print the loss
+        'log_interval' : 50, # How often to print the loss
     }
 
     policy_save_interval = 1000 # How often to save the policy in training steps
@@ -219,22 +220,23 @@ def main():
 
     # Network Params
     network_config = {
-        "critic_learning_rate" : 3e-4,
-        "actor_learning_rate" : 3e-4,
-        "alpha_learning_rate" : 3e-4,
+        "critic_learning_rate" : 1e-4,
+        "actor_learning_rate" : 1e-4,
+        "alpha_learning_rate" : 1e-4,
         "target_update_tau" : 0.005,
         "target_update_period" : 1,
         "gamma" : 0.99,
         "reward_scale_factor" : 1.0,
 
-        "actor_fc_layer_params" : (20, 20, 20, 20),
-        "critic_joint_fc_layer_params" : (20, 20, 20, 20),
+        "actor_fc_layer_params" : (10, 10, 10, 10),
+        "critic_joint_fc_layer_params" : (10, 10, 10, 10),
     }
     
     collect_env = BatchedPyEnvironment(envs=[SafeModeEnv()])
     eval_env = BatchedPyEnvironment(envs=[SafeModeEnv()])
 
     train_step = train_utils.create_train_step() # TF variable equal to 0 
+
     tf_agent = build_agent(collect_env, network_config, train_step)
 
     # Custom Replay Buffer implementation
@@ -246,9 +248,7 @@ def main():
     # Add an observer that adds to the replay buffer:
     replay_observer = replay_buffer.add_batch
 
-    ## Actors: Interact between policy and environment. 
-    # Actors pass trajectories (S,A,R) to observer. Observer caches and writes traj to buffer
-    
+    # Actors pass trajectories (S,A,R) to observer. Observer caches and writes traj to buffer    
     # Policy which randomly selects random actions to seed buffer
     initial_collect_actor = build_initial_collect_actor(collect_env, train_step, replay_observer, initial_collect_steps)
     initial_collect_actor.run()
@@ -260,7 +260,7 @@ def main():
     eval_actor = build_eval_actor(eval_env, tf_agent, train_step, num_eval_episodes, tempdir)
 
     # Learners: Contains agent and performs gradient step updates to policy variables
-    agent_learner = build_agent_learner(tf_agent, train_step, policy_save_interval, replay_buffer, batch_size)
+    agent_learner = build_agent_learner(tf_agent, train_step, policy_save_interval, replay_buffer, batch_size, tempdir)
 
     if continue_training:
         tf_agent, replay_buffer, train_step = load_checkpoint(tf_agent, replay_buffer, train_step, tempdir)

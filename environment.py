@@ -35,21 +35,27 @@ mesh = trimesh.load_mesh(obj_file, file_type=file_extension[1:])
 proximity = trimesh.proximity.ProximityQuery(mesh)
     
 def collision(t, y, grav_model, action):
-    position_in_km = y[0:3]/1E3
-    distance = proximity.signed_distance(position_in_km.reshape((1,3)))
+    cart_pos = y[0:3].reshape((1,3))
+    cart_pos_in_km = cart_pos/1E3
+
+    distance = proximity.signed_distance(cart_pos_in_km.reshape((1,3)))
     return distance
 collision.terminal=True
 
 def depart(t, y, grav_model, action):
-    position_in_km = y[0:3]/1E3
-    distance = Eros().radius*10/1E3 - np.abs(proximity.signed_distance(position_in_km.reshape((1,3)))[0])
+    cart_pos = y[0:3].reshape((1,3))
+    cart_pos_in_km = cart_pos/1E3
+    distance = Eros().radius*10/1E3 - np.abs(proximity.signed_distance(cart_pos_in_km.reshape((1,3)))[0])
     return distance
 depart.terminal=True
 
 def evolve_state(tVec, state, action):
   
-    cart_pos = sphere2cart(state[0:3].reshape((1,3)))
-    cart_vel = invert_projection(state[0:3].reshape((1,3)), state[3:6].reshape((1,3)))
+    sph_pos = state[0:3].reshape((1,3))
+    sph_vel = state[3:6].reshape((1,3))
+
+    cart_pos = sphere2cart(sph_pos)
+    cart_vel = invert_projection(sph_pos, sph_vel)
     
     cart_state = np.squeeze(np.hstack((cart_pos, cart_vel)))
     sol = solve_ivp(xPrimeNN_Impulse,
@@ -61,17 +67,21 @@ def evolve_state(tVec, state, action):
                     args=(gravity_model, action)) 
     
     cart_state = sol.y[:,-1]
-    sph_pos = cart2sph(cart_state[0:3].reshape((1,3)))
-    sph_vel = project_acceleration(sph_pos, cart_state[3:6].reshape((1,3)))
+    cart_pos = cart_state[0:3].reshape((1,3))
+    cart_vel = cart_state[3:6].reshape((1,3))
+
+    sph_pos = cart2sph(cart_pos)
+    sph_vel = project_acceleration(sph_pos, cart_vel)
+
     sph_state = np.squeeze(np.hstack((sph_pos, sph_vel)))
-    # print(np.linalg.norm(sol.y[0:3,-1]))
+
     return np.squeeze(sph_state), (len(sol.t_events[0]) > 0 or len(sol.t_events[1] > 0))
 
 class SafeModeEnv(py_environment.PyEnvironment):
 
   def __init__(self):
     self._action_spec = array_spec.BoundedArraySpec(
-        shape=(3,), minimum=-1, maximum=1, dtype=np.float32, name='action')
+        shape=(3,), minimum=-0.1, maximum=0.1, dtype=np.float32, name='action')
     self._observation_spec = array_spec.ArraySpec(
         shape=(6,), dtype=np.float32,  name='observation')
     self._state = array_spec.ArraySpec(
@@ -89,7 +99,6 @@ class SafeModeEnv(py_environment.PyEnvironment):
     theta = np.random.uniform(0, 360)
     phi = np.random.uniform(0,180)
     sph_pos = np.array([[r, theta, phi]])
-    cart_pos = sphere2cart(sph_pos)
     self._state = np.squeeze(np.hstack((sph_pos,[[0,0,0]])))
     self._episode_ended = False
     return ts.restart(np.array(self._state, dtype=np.float32)) # TODO: looks like this should be observation
@@ -114,10 +123,9 @@ class SafeModeEnv(py_environment.PyEnvironment):
     else:
         reward = 1 # For surviving
         reward -= self._state[0]/(Eros().radius*10) # for traveling far away from asteroid 
-        reward -= np.linalg.norm(action) # For consuming fuel
+        reward -= np.linalg.norm(action)*1 # For consuming fuel
 
         # Consider rewarding the S/C for getting close to the asteroid
-
         return ts.transition(
             np.array(self._state, dtype=np.float32), reward=reward, discount=0.99)
 
