@@ -1,6 +1,7 @@
 *.pyc
 *.o
-
+__pycache__/*
+.vscode/*
 # Windows image file caches
 Thumbs.db
 ehthumbs.db

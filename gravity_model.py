@@ -1,5 +1,6 @@
 from GravNN.Networks.Model import load_config_and_model
 from GravNN.CelestialBodies.Asteroids import Eros
+from GravNN.Support.transformations import invert_projection
 from OrbitalElements.numSolver import solveOrbitODE
 from OrbitalElements import utils
 from OrbitalElements import oe
@@ -68,7 +69,30 @@ def xPrimeNN_Impulse(t, yVec, NN=None, thrust=[0,0,0]):
 
     return xPrime
 
+class ExtFloat:
+    def __init__(self,value):
+        self.value = value
+    def numpy(self):
+        return self.value
 
+class simpleGravityModel:
+    def __init__(self, mu, R):
+        self.mu = mu
+        self.R = R
+        pass
+
+    def generate_acceleration(self, X):
+        r = np.linalg.norm(X)
+        a_r = self.mu/r**2
+        a_theta = 0.0
+        a_phi = 0.0
+
+        a_sph = np.array([a_r, a_theta, a_phi]).reshape((1,3))
+        a_cart = invert_projection(X, a_sph)
+
+        return ExtFloat(a_cart)
+
+    
 
 def main_mod():
     df = pd.read_pickle("Data/DataFrames/eros_grav_model.data")
