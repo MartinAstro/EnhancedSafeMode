@@ -6,6 +6,7 @@ import tensorflow as tf
 import numpy as np
 from tf_agents import replay_buffers
 
+import time
 import os
 import matplotlib.pyplot as plt
 import tempfile
@@ -41,12 +42,12 @@ from tf_agents.train.utils import strategy_utils
 from tf_agents.train.utils import train_utils
 from tf_agents.utils import common
 from tf_agents.environments import wrappers
-
-from utils import load_agent, load_checkpoint
+from GravNN.Support.ProgressBar import ProgressBar
+from utils import load_policy, load_checkpoint
 from metrics import log_eval_metrics, get_eval_metrics
 from visualization import visualize_returns
 from environment import SafeModeEnv
-
+from utils import load_policy
 tempdir = tempfile.gettempdir()
 
 def build_agent(env, config, train_step):
@@ -66,14 +67,18 @@ def build_agent(env, config, train_step):
             action_fc_layer_params=None, # No encoding
             joint_fc_layer_params=config['critic_joint_fc_layer_params'], # (nodes_layer_1, nodes_layer_2, ...)
             kernel_initializer='glorot_uniform',
-            last_kernel_initializer='glorot_uniform'
+            last_kernel_initializer='glorot_uniform',
+            activation_fn=config['activation_fcn'],
+
         )
         actor_net = actor_distribution_network.ActorDistributionNetwork(
                     observation_spec,
                     action_spec, # action_spec needs .shape.num_elements()
                     fc_layer_params=config['actor_fc_layer_params'],
-                    #continuous_projection_net=( # Can't handle bounded array spec
-                    #tanh_normal_projection_network.TanhNormalProjectionNetwork)
+                    activation_fn=config['activation_fcn'],
+
+                    # continuous_projection_net=( # Can't handle bounded array spec
+                    # tanh_normal_projection_network.TanhNormalProjectionNetwork)
             )
 
 
@@ -118,13 +123,19 @@ def build_collect_actor(collect_env, tf_agent, train_step, replay_observer, summ
                                 )
     return collect_actor
 
-def build_initial_collect_actor(collect_env, train_step, replay_observer, initial_collect_steps):
-    random_policy = random_py_policy.RandomPyPolicy(
+def build_initial_collect_actor(collect_env, train_step, replay_observer, initial_collect_steps, custom_policy=None):
+
+    if custom_policy is not None:
+        policy = load_policy(custom_policy)
+        # policy = py_tf_eager_policy.PyTFEagerPolicy(
+        #                     policy, use_tf_function=True)
+    else:
+        policy = random_py_policy.RandomPyPolicy(
                         collect_env.time_step_spec(), collect_env.action_spec())
 
     initial_collect_actor = actor.Actor(
                             collect_env,
-                            random_policy,
+                            policy,
                             train_step,
                             steps_per_run=initial_collect_steps,
                             observers=[replay_observer])
@@ -174,30 +185,33 @@ def build_agent_learner(tf_agent, train_step, policy_save_interval, replay_buffe
 
 
 def main():
-    num_iterations = 20000 # Number of iterations for training networks (epochs)
-    eval_interval = 500 # How often the average return is calculated during training
+    custom_policy = "0000345000"
+
+    num_iterations = 50000 # Number of iterations for training networks (epochs)
+    eval_interval = 5000 # How often the average return is calculated during training
     log_interval = 100 # How often to print the loss
     summary_interval = 1000
 
     policy_save_interval = 1000 # How often to save the policy in training steps
-    num_eval_episodes = 1 # Number of times agent is run to evaluate policy
+    num_eval_episodes = 10 # Number of times agent is run to evaluate policy
 
-    initial_collect_steps = 256*10 # How many times random policy will be used to fill buffer
+    initial_collect_steps = 1000 # How many times random policy will be used to fill buffer
     replay_buffer_capacity = 10000
     batch_size = 256*4 # Batch size used for generating training datasets for networks
 
     # Network Params
     network_config = {
-        "critic_learning_rate" : 1e-4,
-        "actor_learning_rate" : 1e-4,
-        "alpha_learning_rate" : 1e-4,
+        "critic_learning_rate" : 3e-4,
+        "actor_learning_rate" : 3e-4,
+        "alpha_learning_rate" : 3e-4,
         "target_update_tau" : 0.005,
         "target_update_period" : 1,
         "gamma" : 0.99,
         "reward_scale_factor" : 1.0,
 
-        "actor_fc_layer_params" : (10, 10, 10, 10),
-        "critic_joint_fc_layer_params" : (10, 10, 10, 10),
+        "activation_fcn": tf.keras.activations.gelu,
+        "actor_fc_layer_params" : (20, 20, 20, 20),
+        "critic_joint_fc_layer_params" : (20, 20, 20, 20),
     }
     
     collect_env = BatchedPyEnvironment(envs=[wrappers.TimeLimit(SafeModeEnv(), 10*60)])
@@ -219,9 +233,8 @@ def main():
 
     # Actors pass trajectories (S,A,R) to observer. Observer caches and writes traj to buffer    
     # Policy which randomly selects random actions to seed buffer
-    initial_collect_actor = build_initial_collect_actor(collect_env, train_step, replay_observer, initial_collect_steps)
-    initial_collect_actor.run()
-
+    initial_collect_actor = build_initial_collect_actor(collect_env, train_step, replay_observer, initial_collect_steps, custom_policy)
+    
     # Copy of policy for data collection
     collect_actor = build_collect_actor(collect_env, tf_agent, train_step, replay_observer, summary_interval)
 
@@ -231,14 +244,28 @@ def main():
     # Learners: Contains agent and performs gradient step updates to policy variables
     agent_learner = build_agent_learner(tf_agent, train_step, policy_save_interval, replay_buffer, batch_size)
 
+    # if use_init_collect_actor:
+    start_collect = time.time()
+    initial_collect_actor.run()
+    print("Time for Initial Collection: %f" % (time.time() - start_collect))
+    # else:
+    #     pBar = ProgressBar(replay_buffer_capacity,enable=True)
+    #     for i in range(replay_buffer_capacity):
+    #         collect_actor.run()
+    #         pBar.update(i)
+    #     pBar.close()
+
+
+
     # Training the Agent: Includes collecting data from environment and optimizing agent networks
     avg_return = get_eval_metrics(eval_actor)["AverageReturn"] # Runs num_eval_episodes in the environment
     returns = [avg_return]
+    print("Initial Average Return: " + str(avg_return))
 
     for _ in range(num_iterations):
         # Training.
         collect_actor.run() # Add to the replay buffer
-        loss_info = agent_learner.run(iterations=10)
+        loss_info = agent_learner.run(iterations=1)
 
         # Evaluating.
         step = agent_learner.train_step_numpy
