@@ -6,18 +6,17 @@ import numpy as np
 import OrbitalElements.orbitalPlotting as op
 import tensorflow as tf
 from GravNN.CelestialBodies.Asteroids import Eros
-from GravNN.Support.transformations import spherePines2cart
+from GravNN.Support.transformations import sphere2cart, spherePines2cart
 from tf_agents.environments.batched_py_environment import BatchedPyEnvironment
 import copy
-from environment import R_ref, SafeModeEnv
+from environment import SafeModeEnv
 from utils import load_policy
 from GravNN.Visualization.VisualizationBase import VisualizationBase
 
 
 
-def visualize_returns(num_iterations, eval_interval, returns):
+def visualize_returns(steps, returns):
     # Visualization
-    steps = range(0, num_iterations + 1, eval_interval)
     plt.plot(steps, returns)
     plt.ylabel('Average Return')
     plt.xlabel('Step')
@@ -36,10 +35,33 @@ def visualize_returns_ci(data):
                     (returns+conf_intervals), 
                     color='blue', alpha=0.5)
     
+def plot_gravity_field():
+    import pandas as pd
+    from GravNN.Networks.Model import load_config_and_model
+    df = pd.read_pickle("Data/DataFrames/eros_grav_model.data")
+    config, gravity_model = load_config_and_model(df.iloc[0]['id'], df)
+
+    vis = VisualizationBase()
+    vis.newFig()
+    rVec = np.linspace(Eros().radius, Eros().radius*10,1000)
+    aVec = []
+    pVec = []
+    for r in rVec:
+        cart_pos = sphere2cart(np.array([r, 0, 0]).reshape((1,3))).reshape((3,))
+        pVec.append(cart_pos)
+    X = np.array(pVec).reshape((-1,3)).astype(np.float32)
+    aVec = gravity_model.generate_acceleration(X).numpy()
+    a_mag = np.linalg.norm(aVec, axis=1)
+    plt.plot(rVec, a_mag)
+    plt.show()
+
 def main_mod():
     step = '0000021000'
     step = '0000045000'
-    policy = load_policy(step)
+    step = '0000300000'
+    step = '0000100000'
+    load_dir = os.path.expanduser('~') + "/Desktop/BestPolicy/"
+    policy = load_policy(step, load_dir=load_dir)
     env = BatchedPyEnvironment(envs=[SafeModeEnv(random_seed=None)])
 
     time_step = env.reset()
@@ -69,3 +91,4 @@ def main_mod():
     return 
 if __name__ == "__main__":
     main_mod()
+    # plot_gravity_field()
