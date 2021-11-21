@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 import glob
 
@@ -26,8 +27,6 @@ def copy_files(root_src_dir, root_dst_dir):
         if not os.path.exists(dst_dir):
             os.makedirs(dst_dir)
         for file_ in files:
-            #if 'variable' in file_:
-            #    continue
             src_file = os.path.join(src_dir, file_)
             dst_file = os.path.join(dst_dir, file_)
             if os.path.exists(dst_file):
@@ -43,17 +42,29 @@ def collect_policy_checkpoints():
     policies = glob.glob(directories)
     for i in range(len(policies)):
         policies[i] = policies[i].split("_")[-1]
-
     policies.sort()
     return policies
 
-def load_policy(chpt_number):
+def load_policy(chpt_number, load_dir=None):
     import tensorflow as tf
     from tf_agents.utils import common
     assert len(chpt_number) == 10
-    tempdir = os.getenv("TEST_TMPDIR", tempfile.gettempdir())
+    if load_dir is None:
+        tempdir = os.getenv("TEST_TMPDIR", tempfile.gettempdir())
+    else:
+        tempdir = load_dir
     from_dir = os.path.join(tempdir, 'policies/checkpoints/policy_checkpoint_'+chpt_number+"")
     to_dir = os.path.join(tempdir, 'policies/policy')
     copy_files(from_dir, to_dir)
     policy = tf.saved_model.load(os.path.join(tempdir, 'policies/policy'))
     return policy
+
+def save_policy(save_dir):
+    # save to Data/Policies/directory
+    tempdir = os.getenv("TEST_TMPDIR", tempfile.gettempdir())
+    for directory in ['policies/', 'eval/', 'train/']:
+        from_dir = os.path.join(tempdir, directory )
+        to_dir = os.path.join('Data/Policies/' + save_dir, directory)
+        copy_files(from_dir, to_dir)
+        shutil.rmtree(from_dir)
+    print("Policy directories saved to: %s" % ('Data/Policies/' + save_dir))
