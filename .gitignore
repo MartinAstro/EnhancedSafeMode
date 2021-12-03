@@ -1,3 +1,7 @@
+Data/Policies/*
+Plots/*
+Data/Trajectories/*
+returns.data
 *.pyc
 *.o
 __pycache__/*

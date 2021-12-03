@@ -45,7 +45,9 @@ def compute_fuel_cost(m_0, action):
     g = 9.80665 # constants drawn from BSK
     Isp = 226.7 # constants drawn from BSK
     v_e = Isp*g
+    # m_0 += 500.0 #account for initial mass
     m_f = m_0 *np.exp(-np.linalg.norm(action)/v_e)
+    # m_f -= 500.0
     return m_f
 
 @njit(cache=True)
@@ -74,7 +76,8 @@ def flag_failure(t_events, m_f):
     failure_type = "Succeeded"
     collided = len(t_events[0]) > 0
     departed = len(t_events[1]) > 0
-    depleted = m_f < 500.0
+    # depleted = m_f < 500.0
+    depleted = m_f < 0.0
     if collided:
       print("Failure: Collided")
       failure = True
@@ -105,7 +108,8 @@ class SafeModeEnv(py_environment.PyEnvironment):
     mesh = trimesh.load_mesh(obj_file, file_type=file_extension[1:])
     self.proximity = trimesh.proximity.ProximityQuery(mesh)
 
-    self.M_ref = 540.0
+    self.M_ref = 40.0
+    # self.M_ref = 540.0
     self.R_ref = planet.radius*3.0#10.0
     self.V_ref = np.sqrt(planet.mu*((2.0/planet.radius) - 0.0)) #escape velocity from Brill Sphere
 
@@ -116,7 +120,7 @@ class SafeModeEnv(py_environment.PyEnvironment):
     # setattr(SafeModeEnv.depart, "count", 0)
 
     self._action_spec = array_spec.BoundedArraySpec(
-        shape=(3,), minimum=-1, maximum=1, dtype=np.float32, name='action')
+        shape=(3,), minimum=-0.1, maximum=0.1, dtype=np.float32, name='action')
     self._observation_spec = array_spec.ArraySpec(
         shape=(8,), dtype=np.float32,  name='observation')
     self._state = array_spec.ArraySpec(
@@ -144,9 +148,10 @@ class SafeModeEnv(py_environment.PyEnvironment):
       
       sph_pos = np.array([r, s, t, u])
       sph_vel = np.array([0.0,0.0,0.0]) + np.random.uniform(-1,1, size=(3,))
-      bus_mass = 500.0 # kg
+      # bus_mass = 500.0 # kg
       fuel_mass = np.random.uniform(20, 40)
-      sc_mass = bus_mass + fuel_mass
+      # sc_mass = bus_mass + fuel_mass
+      sc_mass = fuel_mass
 
       state = np.hstack((sph_pos, sph_vel, sc_mass))#.reshape((1,-1))
       self._state = normalize_state(state, self.R_ref, self.V_ref, self.M_ref)
@@ -176,9 +181,10 @@ class SafeModeEnv(py_environment.PyEnvironment):
       
       sph_pos = np.array([r, s, t, u])
       sph_vel = vVec.numpy()[0]
-      bus_mass = 500.0 # kg
+      # bus_mass = 500.0 # kg
       fuel_mass = np.random.uniform(20, 40)
-      sc_mass = bus_mass + fuel_mass
+      # sc_mass = bus_mass + fuel_mass
+      sc_mass = fuel_mass
 
       state = np.hstack((sph_pos, sph_vel, sc_mass))#.reshape((1,-1))
       self._state = normalize_state(state, self.R_ref, self.V_ref, self.M_ref)
@@ -209,7 +215,7 @@ class SafeModeEnv(py_environment.PyEnvironment):
     else:
         reward = 1 # For surviving
         reward -= self._state[0] # for traveling far away from asteroid 
-        reward -= dm * self.M_ref  # For consuming fuel 
+        # reward -= dm * self.M_ref  # For consuming fuel 
 
         return ts.transition(
             np.array(self._state, dtype=np.float32), reward=reward, discount=0.99)
@@ -247,10 +253,10 @@ def main():
 
   planet = Eros()
   gravity_model = pinnGravityModel("Data/DataFrames/eros_grav_model.data")
-  gravity_model = polyhedralGravityModel(planet, planet.obj_200k)
-  gravity_model = polyhedralGravityModel(planet, planet.model_7790)
+  # gravity_model = polyhedralGravityModel(planet, planet.obj_200k)
+  # gravity_model = polyhedralGravityModel(planet, planet.model_7790)
 
-  env = SafeModeEnv(planet, gravity_model, reset_type='orbiting')
+  env = SafeModeEnv(planet, gravity_model, reset_type='standard')
   utils.validate_py_environment(env, episodes=1)
 
   run_stats_env = wrappers.RunStats(env)
@@ -268,7 +274,7 @@ def main():
     episode_reward = 0
     episode_steps = 0
     while not time_step.is_last():
-      action = tf.random.uniform([1,3], minval=-1, maxval=1, dtype=tf.float32).numpy()
+      action = tf.random.uniform([1,3], minval=-0.1, maxval=0.1, dtype=tf.float32).numpy()
       time_step = tf_env.step(action)
       episode_steps += 1
       episode_reward += time_step.reward#.numpy()
