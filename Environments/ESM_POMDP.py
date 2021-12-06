@@ -17,7 +17,7 @@ from tf_agents.environments import suite_gym
 from tf_agents.trajectories import time_step as ts
 
 from GravNN.CelestialBodies.Asteroids import Eros
-from numba import njit, gdb_init
+from numba import njit
 import trimesh
 import os
 from scipy.integrate import solve_ivp
@@ -26,7 +26,7 @@ import pandas as pd
 from OrbitalElements import oe
 from GravNN.Networks.Model import load_config_and_model
 from GravNN.Support.transformations import cart2sphPines, spherePines2cart, sphere2cart
-from gravity_models import pinnGravityModel, polyhedralGravityModel
+from gravity_models import PINNGravityModel
 from OrbitalElements.coordinate_transforms import oe2cart_tf
 
 @njit()# cache=True causes segfaults ??
@@ -92,7 +92,9 @@ def flag_failure(t_events, m_f):
       failure_type = 'Depleted'
     return failure, failure_type
 
-class SafeModeEnv(py_environment.PyEnvironment):
+  
+
+class ESM_POMDP(py_environment.PyEnvironment):
   def __init__(self, planet, gravity_model, reset_type='standard', random_seed=None):
     if random_seed is not None:
         np.random.seed(random_seed)
@@ -105,24 +107,21 @@ class SafeModeEnv(py_environment.PyEnvironment):
     # Configure the shape mesh and reference velocity and radius
     obj_file = planet.model_potatok
     filename, file_extension = os.path.splitext(obj_file)
-    mesh = trimesh.load_mesh(obj_file, file_type=file_extension[1:])
-    self.proximity = trimesh.proximity.ProximityQuery(mesh)
+    self.mesh = trimesh.load_mesh(obj_file, file_type=file_extension[1:])
+    self.proximity = trimesh.proximity.ProximityQuery(self.mesh)
 
     self.M_ref = 40.0
     # self.M_ref = 540.0
     self.R_ref = planet.radius*3.0#10.0
     self.V_ref = np.sqrt(planet.mu*((2.0/planet.radius) - 0.0)) #escape velocity from Brill Sphere
 
-    setattr(SafeModeEnv.collision, "terminal", True)
-    setattr(SafeModeEnv.depart, "terminal", True)
-
-    # setattr(SafeModeEnv.collision, "count", 0)
-    # setattr(SafeModeEnv.depart, "count", 0)
+    setattr(ESM_POMDP.collision, "terminal", True)
+    setattr(ESM_POMDP.depart, "terminal", True)
 
     self._action_spec = array_spec.BoundedArraySpec(
         shape=(3,), minimum=-0.1, maximum=0.1, dtype=np.float32, name='action')
     self._observation_spec = array_spec.ArraySpec(
-        shape=(8,), dtype=np.float32,  name='observation')
+        shape=(2,), dtype=np.float32,  name='observation')
     self._state = array_spec.ArraySpec(
         shape=(8,), dtype=np.float32,  name='state')
     self._episode_ended = False
@@ -156,7 +155,9 @@ class SafeModeEnv(py_environment.PyEnvironment):
       state = np.hstack((sph_pos, sph_vel, sc_mass))#.reshape((1,-1))
       self._state = normalize_state(state, self.R_ref, self.V_ref, self.M_ref)
       self._episode_ended = False
-      return ts.restart(np.array(self._state, dtype=np.float32)) # TODO: looks like this should be observation
+
+      observation = self.state_to_obs(self._state)
+      return ts.restart(np.array(observation, dtype=np.float32)) # TODO: looks like this should be observation
 
     elif self.reset_type == 'orbiting':
       a = np.random.uniform(self.planet.radius, self.R_ref)
@@ -189,7 +190,8 @@ class SafeModeEnv(py_environment.PyEnvironment):
       state = np.hstack((sph_pos, sph_vel, sc_mass))#.reshape((1,-1))
       self._state = normalize_state(state, self.R_ref, self.V_ref, self.M_ref)
       self._episode_ended = False
-      return ts.restart(np.array(self._state, dtype=np.float32)) # TODO: looks like this should be observation
+      observation = self.state_to_obs(self._state)
+      return ts.restart(np.array(observation, dtype=np.float32)) # TODO: looks like this should be observation
     else:
       return NotImplementedError()
 
@@ -206,19 +208,19 @@ class SafeModeEnv(py_environment.PyEnvironment):
     if terminal:
         self._episode_ended = True
     else:
-        dm = self._state[7] - sp[7] # Normalized fuel
         self._state = sp
 
     if self._episode_ended:
         reward = -100 if terminal else 0.0
-        return ts.termination(np.array(self._state, dtype=np.float32), reward)
+        observation = self.state_to_obs(self._state)
+        return ts.termination(np.array(observation, dtype=np.float32), reward)
     else:
         reward = 1 # For surviving
         reward -= self._state[0] # for traveling far away from asteroid 
-        # reward -= dm * self.M_ref  # For consuming fuel 
+        observation = self.state_to_obs(self._state)
 
         return ts.transition(
-            np.array(self._state, dtype=np.float32), reward=reward, discount=0.99)
+            np.array(observation, dtype=np.float32), reward=reward, discount=0.99)
 
   def evolve_state(self, tVec, state, action):
       cart_state, m_f = get_integrator_state(state, action, self.R_ref, self.V_ref, self.M_ref)
@@ -247,16 +249,38 @@ class SafeModeEnv(py_environment.PyEnvironment):
       distance = self.R_ref/1E3 - np.abs(self.proximity.signed_distance(cart_pos_in_km.reshape((1,3)))[0])
       return distance
 
+  def state_to_obs(self, state):
+      cart_pos = state[0:3].reshape((1,3))
+      cart_pos_in_km = cart_pos/1E3
 
+      # Calculate the range and unit vector (for range rate)
+      ray_direction = -cart_pos_in_km/np.linalg.norm(cart_pos_in_km)
+
+      interesect_locations, index_ray, index_tri = self.mesh.ray.intersects_location(
+                                        ray_origins=cart_pos_in_km,
+                                        ray_directions=ray_direction)
+
+      position_diff = interesect_locations - cart_pos_in_km
+      pseudoranges = np.linalg.norm(position_diff, axis=1)
+      pseudorange = np.min(pseudoranges)
+      pseudorange_direction = position_diff[np.where(pseudoranges == pseudorange)]
+      pseudorange_direction /= np.linalg.norm(pseudorange_direction)
+
+
+      cart_vel = state[3:6].reshape((1,3))
+      pseudorange_rate = np.dot(cart_vel.reshape((-1)), pseudorange_direction.reshape((-1)))
+
+      observation = np.array([pseudorange, pseudorange_rate])
+      return observation
 
 def main():
 
   planet = Eros()
-  gravity_model = pinnGravityModel("Data/DataFrames/eros_grav_model.data")
-  # gravity_model = polyhedralGravityModel(planet, planet.obj_200k)
-  # gravity_model = polyhedralGravityModel(planet, planet.model_7790)
+  gravity_model = PINNGravityModel("Data/DataFrames/eros_grav_model.data")
+  # gravity_model = PolyhedralGravityModel(planet, planet.obj_200k)
+  # gravity_model = PolyhedralGravityModel(planet, planet.model_7790)
 
-  env = SafeModeEnv(planet, gravity_model, reset_type='standard')
+  env = ESM_POMDP(planet, gravity_model, reset_type='standard')
   utils.validate_py_environment(env, episodes=1)
 
   run_stats_env = wrappers.RunStats(env)

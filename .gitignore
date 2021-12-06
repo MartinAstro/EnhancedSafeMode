@@ -5,6 +5,7 @@ returns.data
 *.pyc
 *.o
 __pycache__/*
+Environments/__pycache__/*
 .vscode/*
 # Windows image file caches
 Thumbs.db

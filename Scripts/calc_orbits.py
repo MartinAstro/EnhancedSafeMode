@@ -9,12 +9,10 @@ from GravNN.CelestialBodies.Asteroids import Eros
 from GravNN.Support.transformations import spherePines2cart
 from tf_agents.environments.batched_py_environment import BatchedPyEnvironment
 
-from environment import SafeModeEnv
-from gravity_models import pinnGravityModel
+from Environments.ESM_MDP import SafeModeEnv
+from gravity_models import PINNGravityModel
 from utils import load_policy, save_policy
 import pickle
-from tf_agents.environments import wrappers
-
 
 def get_trajectory(env, policy):
     time_step = env.reset()
@@ -36,39 +34,33 @@ def get_trajectory(env, policy):
     tVec = np.array(tVec)
     return rVec, tVec
 
-
-def save_trajectory(i, policy_name, max_policy_idx, env):
+def save_trajectory(policy_name, max_policy_idx, env):
     policy = load_policy(max_policy_idx, "Data/Policies/"+policy_name)
     rVec, tVec = get_trajectory(env, policy)
-    with open("Data/Trajectories/"+policy_name+"_trajectory_"+str(i)+".data", 'wb') as f:
+    with open("Data/Policies/" + policy_name + "/trajectory.data", 'wb') as f:
         pickle.dump(tVec, f)
         pickle.dump(rVec, f)
 
 
 def main():
-    seed = 13 # 13 is best
-    planet = Eros()
-    pinn_model = pinnGravityModel("Data/DataFrames/eros_grav_model.data")   
-    orig_env = SafeModeEnv(planet, pinn_model, reset_type='standard', random_seed=None)
-    time_limit_env = wrappers.TimeLimit(orig_env, duration=1*60*5) # run for 600 steps at most
-    env = BatchedPyEnvironment(envs=[time_limit_env])
-    np.random.seed(seed)
-    for i in range(3):    
-        policy_name = "PINN_Policy"
-        max_policy = "0000110000"
-        save_trajectory(i, policy_name, max_policy, env)
-        
-    np.random.seed(seed)
-    for i in range(3):    
-        policy_name = "Poly_Policy"
-        max_policy = "0000000200"
-        save_trajectory(i, policy_name, max_policy, env)
 
-    np.random.seed(seed)
-    for i in range(3):    
-        policy_name = "Simple_Policy"
-        max_policy = "0000270000"
-        save_trajectory(i, policy_name, max_policy, env)
+    planet = Eros()
+    pinn_model = PINNGravityModel("Data/DataFrames/eros_grav_model.data")   
+    env = BatchedPyEnvironment(envs=[SafeModeEnv(planet, pinn_model, reset_type='standard', random_seed=None)])
+
+    policy_name = "PINN_Policy"
+    max_policy = "0000110000"
+    save_trajectory(policy_name, max_policy, env)
+    
+    policy_name = "Poly_Policy"
+    max_policy = "0000000200"
+    save_trajectory(policy_name, max_policy, env)
+
+    policy_name = "Simple_Policy"
+    max_policy = "0000270000"
+    save_trajectory(policy_name, max_policy, env)
+
+
     
 
 if __name__ == "__main__":

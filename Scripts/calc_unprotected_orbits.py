@@ -9,8 +9,8 @@ from GravNN.CelestialBodies.Asteroids import Eros
 from GravNN.Support.transformations import spherePines2cart
 from tf_agents.environments.batched_py_environment import BatchedPyEnvironment
 
-from environment import SafeModeEnv
-from gravity_models import pinnGravityModel
+from Environments.ESM_MDP import SafeModeEnv
+from gravity_models import PINNGravityModel
 from utils import load_policy, save_policy
 import pickle
 
@@ -44,7 +44,7 @@ def save_trajectory(i, env):
 def main():
     np.random.seed(0)
     planet = Eros()
-    pinn_model = pinnGravityModel("Data/DataFrames/eros_grav_model.data")   
+    pinn_model = PINNGravityModel("Data/DataFrames/eros_grav_model.data")   
     env = BatchedPyEnvironment(envs=[SafeModeEnv(planet, pinn_model, reset_type='standard', random_seed=None)])
     for i in range(5):
         save_trajectory(i, env)

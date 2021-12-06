@@ -145,11 +145,11 @@ def test_env():
   from OrbitalElements import oe
   from GravNN.Networks.Model import load_config_and_model
   from GravNN.Support.transformations import cart2sphPines, spherePines2cart
-  from gravity_models import pinnGravityModel, polyhedralGravityModel
+  from gravity_models import PINNGravityModel, PolyhedralGravityModel
   from OrbitalElements.coordinate_transforms import oe2cart_tf
-  from environment import SafeModeEnv
+  from Environments.ESM_MDP import SafeModeEnv
   planet = Eros()
-  gravity_model = pinnGravityModel("Data/DataFrames/eros_grav_model.data")
+  gravity_model = PINNGravityModel("Data/DataFrames/eros_grav_model.data")
 
 
   env = SafeModeEnv(planet, gravity_model, reset_type='orbiting')

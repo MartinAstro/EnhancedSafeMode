@@ -9,13 +9,12 @@ from GravNN.CelestialBodies.Asteroids import Eros
 from GravNN.Support.transformations import spherePines2cart
 from tf_agents.environments.batched_py_environment import BatchedPyEnvironment
 
-from environment import SafeModeEnv
-from gravity_models import pinnGravityModel
+from Environments.ESM_MDP import SafeModeEnv
+from gravity_models import PINNGravityModel
 from utils import collect_policy_checkpoints, load_policy
 import pickle
 from tf_agents.environments import wrappers
 
-from visualization import visualize_returns_ci
 def confidence_interval(returns, CI):
     #Confidence Interval x  +/-  0.95*(s/√n)
     std = np.std(returns)
@@ -44,7 +43,7 @@ def eval_policy(policy_name, max_policy_idx, env, episodes):
 
 def main():
     planet = Eros()
-    pinn_model = pinnGravityModel("Data/DataFrames/eros_grav_model.data")   
+    pinn_model = PINNGravityModel("Data/DataFrames/eros_grav_model.data")   
     orig_env = SafeModeEnv(planet, pinn_model, reset_type='standard', random_seed=None)
     time_limit_env = wrappers.TimeLimit(orig_env, duration=1*60) # run for 600 steps at most
     env = BatchedPyEnvironment(envs=[time_limit_env])

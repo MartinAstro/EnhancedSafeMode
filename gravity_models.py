@@ -10,7 +10,7 @@ class ExtFloat:
     def numpy(self):
         return self.value
 
-class simpleGravityModel:
+class SimpleGravityModel:
     def __init__(self, mu):
         self.mu = mu
 
@@ -25,8 +25,7 @@ class simpleGravityModel:
         a_cart = invert_projection(x_sph, a_sph)
         return a_cart
 
-
-class polyhedralGravityModel():
+class PolyhedralGravityModel():
     def __init__(self, celestial_body, obj_file):
         self.poly_model = Polyhedral(celestial_body, obj_file)
 
@@ -35,8 +34,7 @@ class polyhedralGravityModel():
         a = self.poly_model.compute_acceleration(positions=X, pbar=False)
         return a
 
-
-class pinnGravityModel():
+class PINNGravityModel():
     def __init__(self, df_file):
         df = pd.read_pickle(df_file)
         _, gravity_model = load_config_and_model(df.iloc[0]['id'], df)
